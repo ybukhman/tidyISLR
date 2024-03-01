@@ -47,4 +47,6 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Windows and Mac aliases and shortcuts
 ISLR alias

@@ -1,0 +1,164 @@
+---
+title: "A rewrite of the ISLR Chapter 10 Lab using the tidyverse and tidymodels. Part 1: Hitters."
+author: "Yury V Bukhman"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    toc: TRUE
+    toc_float: TRUE
+---
+
+```{r setup, echo = FALSE}
+knitr::opts_chunk$set(error = TRUE)
+```
+
+Load libraries
+```{r}
+# Libraries used in the original code
+library(ISLR2)
+library(glmnet)
+library(keras)
+reticulate::use_condaenv(condaenv = "r-tensorflow")
+library(jpeg)
+library(Matrix)
+
+# Tidyverse
+library(tidyverse)
+library(ggplot2)
+library(tidymodels)
+library(dotwhisker)
+library(usemodels)
+```
+
+Conflict resolution
+```{r}
+tidymodels_prefer(quiet = FALSE)
+```
+
+## A Single Layer Network on the Hitters Data
+
+### A simple linear model
+We start by fitting the models in Section 10.6. We set up the data, and separate out a training and test set.
+
+```{r chunk1}
+Gitters <- na.omit(Hitters)
+set.seed(13)
+
+# Put 2/3 of the data into the training set 
+data_split <- initial_split(Gitters, prop = 2/3)
+
+# Create data frames for the two sets:
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+```
+
+Fit the model on the training data
+```{r}
+lm_mod <- linear_reg()
+lm_fit <- 
+  lm_mod %>% 
+  fit(Salary ~ ., data = train_data)
+tidy(lm_fit)
+```
+
+Dotwhisker plot
+```{r}
+lm_fit %>% tidy %>% dwplot(vline = geom_vline(xintercept = 0, colour = "grey50", linetype = 2))
+```
+
+Predict the test data and compute the mean absolute error and other goodness of fit metrics
+```{r}
+test_data %>% 
+  mutate(predicted_salary = predict(lm_fit, new_data = .)[[".pred"]]) %>%
+  metrics(truth = Salary, estimate = predicted_salary)
+```
+
+### Fit the lasso using `glmnet`. 
+
+```{r}
+# Preprocess the data
+rec <- recipe(Salary ~ ., data = train_data) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors())
+
+# Define model specification
+lasso_spec <- linear_reg(penalty = tune(), mixture = 1) %>%
+  set_engine("glmnet")
+
+# Create a workflow
+wf <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(lasso_spec)
+
+# Set up cross-validation
+cv_folds <- vfold_cv(train_data, v = 5)
+
+# Tune the penalty parameter
+lasso_grid <- tune_grid(
+  wf,
+  resamples = cv_folds,
+  grid = 20,
+  metrics = metric_set(mae)
+)
+
+# Select the best penalty value
+best_penalty <- select_best(lasso_grid, metric = "mae")
+
+# Finalize the workflow with the best penalty
+final_wf <- finalize_workflow(wf, best_penalty)
+
+# Fit the finalized model on the training data
+final_fit <- fit(final_wf, data = train_data)
+
+# Make predictions on the test set
+test_results <- predict(final_fit, new_data = test_data) %>%
+  bind_cols(test_data) %>%
+  mutate(abs_error = abs(Salary - .pred))
+
+# Calculate mean absolute error (MAE)
+#mae_value <- mean(test_results$abs_error)
+#mae_value
+
+# Calculate goodness of fit metrics
+metrics(test_results, truth = Salary, estimate = .pred)
+```
+
+Display the coefficients of the final fit
+```{r}
+final_model <- extract_fit_parsnip(final_fit)
+coefficients <- coef(final_model$fit, s = best_penalty$penalty)
+coefficients
+```
+
+### Fit the neural network
+
+```{r}
+# Preprocess the data
+rec <- recipe(Salary ~ ., data = train_data) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors())
+
+# Define model specification using keras as an engine
+nn_spec <- mlp(hidden_units = 50, dropout = 0.4, epochs = 300, activation = "relu") %>%
+  set_engine("keras", optimizer = optimizer_rmsprop(), loss = "mse", validation_split = 0.2, batch_size = 32, verbose = 1, metrics = list("mean_absolute_error")) %>%
+  set_mode("regression")
+
+# Create a workflow
+nn_wf <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(nn_spec)
+
+# Fit the model
+nn_fit <- fit(nn_wf, data = train_data)
+
+# Make predictions on the test set
+test_results <- predict(nn_fit, new_data = test_data) %>%
+  bind_cols(test_data) %>%
+  mutate(abs_error = abs(Salary - .pred))
+
+# Calculate mean absolute error (MAE)
+mean_absolute_error <- mean(test_results$abs_error)
+mean_absolute_error
+```
+

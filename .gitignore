@@ -50,3 +50,6 @@ rsconnect/
 
 # Windows and Mac aliases and shortcuts
 ISLR alias
+
+# Data files
+data/

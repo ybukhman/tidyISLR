@@ -52,10 +52,16 @@ ui <- fluidPage(
 # Define server logic required to draw a histogram
 server <- function(input, output) {
   
+  # The variable to display
+  values <- reactive({Hitters2[,input$variable]})
+  
   # Histogram
   output$histPlot <- renderPlot({
     
-    x <- Hitters2[,input$variable]
+    # The vector to plot
+    x <- values()
+    
+    #x <- Hitters2[,input$variable]
     bins <- seq(min(x), max(x), length.out = input$bins + 1)
     
     # draw the histogram with the specified number of bins
@@ -67,8 +73,8 @@ server <- function(input, output) {
   # Violin + jitter plot
   output$violinJitterPlot <- renderPlot({
     ggplot(Hitters2) + 
-      geom_violin(aes(x = Rookie, y = Hitters2[,input$variable])) + 
-      geom_jitter(aes(x = Rookie, y = Hitters2[,input$variable])) +
+      geom_violin(aes(x = Rookie, y = values())) +
+      geom_jitter(aes(x = Rookie, y = values())) +
       scale_y_log10() +
       ylab(input$variable)
   })

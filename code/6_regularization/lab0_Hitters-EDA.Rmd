@@ -1,0 +1,199 @@
+---
+title: "ISLR Chapter 6 Lab part 0: exploratory data analysis of the Hitters dataset"
+author: "Yury V Bukhman"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    toc: TRUE
+    toc_float: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The ISLR Chapter 6 lab demonstrates the use of variable selection and regularization methods on the `Hitters` dataset, which records and salaries of baseball players. Before plunging into the analysis, I would like to systematically explore and visualize the data. Here I shall follow Chapter 7 of the R for Data Science online book, [Exploratory Data Analysis](https://r4ds.had.co.nz/exploratory-data-analysis.html).
+
+## Set-up
+
+1.  Set working directory to the location of the R Markdown file
+2.  Load libraries
+
+```{r}
+library(ISLR2)
+library(tidyverse)
+library(ggplot2)
+```
+
+## Summarize the Hitters dataset
+
+Display dataset documentation
+
+```{r}
+?Hitters
+```
+
+Variables and their types
+
+```{r}
+str(Hitters)
+```
+
+Summarized distributions
+
+```{r}
+summary(Hitters)
+```
+
+## Filter the data
+
+Only look at the players whose salaries have been recorded. The Salary is missing (`NA`) for 59 players, as shown above.
+
+```{r}
+Hitters2 <- filter(Hitters, is.finite(Salary))
+```
+
+## Leagues and divisions
+
+```{r}
+with(Hitters2, table(League, Division))
+```
+
+How many players changed the league between 1986 and 1987?
+
+```{r}
+with(Hitters2, table(League, NewLeague))
+```
+
+## Salary
+
+Plot a histogram.
+
+```{r}
+ggplot(Hitters2) + geom_histogram(aes(x = Salary))
+```
+
+Most players were relatively low-paid. A few were paid a lot.
+
+The distribution looks less skewed on the log scale
+
+```{r}
+ggplot(Hitters2) + geom_histogram(aes(x = Salary)) + scale_x_log10()
+```
+
+Let's also try different bin widths. A smaller bin looks different.
+
+```{r}
+ggplot(Hitters2) + geom_histogram(aes(x = Salary), binwidth = 10)
+```
+
+And on log scale:
+
+```{r}
+ggplot(Hitters2) + geom_histogram(aes(x = Salary), binwidth = 0.01) + scale_x_log10()
+```
+
+Split by league. Use the frequency polynomial instead of the histogram
+
+```{r}
+ggplot(Hitters2) + geom_freqpoly(aes(x = Salary, color = League))
+```
+
+More of a binomial distribution in League *N*
+
+Split by division
+
+```{r}
+ggplot(Hitters2) + geom_freqpoly(aes(x = Salary, color = Division))
+```
+
+A violin + jitter plot of salary vs. league and division
+
+```{r}
+ggplot(Hitters2) + 
+  geom_violin(aes(x = paste(League, Division), y = Salary, colour = Division)) + 
+  geom_jitter(aes(x = paste(League, Division), y = Salary, colour = Division))
+```
+
+Same on the log scale
+
+```{r}
+ggplot(Hitters2) + 
+  geom_violin(aes(x = paste(League, Division), y = Salary, colour = Division)) + 
+  geom_jitter(aes(x = paste(League, Division), y = Salary, colour = Division)) +
+  scale_y_log10()
+```
+
+So, the distribution shapes are different, with AE and NW having modes somewhere between 300 and 1K and skewed towards lower salaries, while AW and NE being bimodal, with even higher proportions of relatively low-paid players. However, I don't expect that we would find significant associations between salary and either league or division in a simple additive regression model.
+
+Should I log-transform the salary before fitting any models? Louis Cialdella [discusses](https://lmc2179.github.io/menu/about.html) this on his Casual Inference blog. Although the salary distribution is skewed and it's general quite common to log-transform non-negative variables, I should probably first fit a model without transformation and take a look at the residuals.
+
+I am not sure how much I need to worry about the bimodality. Perhaps I should try [mixture models](https://en.wikipedia.org/wiki/Mixture_model) at some point?
+
+Narayanan Sivasailam's [Rpubs post](https://www.rpubs.com/narasiva90/ISLR_LinModSelectionLab) introduces a binary variable *Rookie*, derived by binning *Years* as follows: *1 if years \< 4; 0 otherwise*. It looks like log(salary) is determined to a large extent by whether a player is a rookie. Interestingly, N. Sivasailam knew that the rookie contract was < 4 years even though it was not documented in the ISLR package. This could be a good example of how domain knowledge can guide statistical analysis. Unfortunately, Sivasailam's post doesn't contain much discussion and doesn't expose the R code.
+
+Add the Rookie variable
+
+```{r}
+Hitters2 <- mutate(Hitters2, Rookie = ifelse(Years < 4, TRUE, FALSE))
+```
+
+A violin+jitter plot split by Rookie
+
+```{r}
+ggplot(Hitters2) + 
+  geom_violin(aes(x = Rookie, y = Salary)) + 
+  geom_jitter(aes(x = Rookie, y = Salary)) +
+  scale_y_log10()
+```
+
+Obviously, rookies are definitely paid much less than non-rookies on average. However, there are some exceptions in both groups.
+
+I am particularly interested in rookies that have unusually high salaries.
+
+```{r}
+Hitters2 %>% filter(Rookie & Salary > 300) %>% select(Salary)
+```
+
+## Explore other variables
+
+I like the violin + jitter plots more than histograms, so I'll use them for continuous variables. I'll also explore the possible correlations of each variable with rookie status and salary.
+
+### AtBat
+
+Distribution
+
+```{r}
+ggplot(Hitters2, aes(x = "AtBat", y = AtBat)) + geom_violin() + geom_jitter() + coord_flip() + scale_y_log10()
+```
+
+Who are the two players that are almost never at bat?
+
+```{r}
+Hitters2 %>% filter(AtBat < 30) %>% select(AtBat, Rookie, Salary)
+```
+
+These are two of the unusually high-paid rookies. What's going on?
+
+Mike Schmidt was known for his homeruns:
+
+Albert, Jim. 1998. “The Home-Run Hitting of Mike Schmidt.” *CHANCE* 11 (3): 3–11. <https://doi.org/10.1080/09332480.1998.10542100>.
+
+Notably, in 1986, Mike Schmidt was not a rookie: according to Albert, he had been playing for the Philadelphia Phillies since 1972. Furthermore, he had 522 at-bats. Looks like I found an error in the data. All or most of Mike Schmidt's data seem to be wrong, except for his salary:
+```{r}
+Hitters["-Mike Schmidt",]
+```
+
+Terry Kennedy was also no rookie in 1986. According to [Wikipedia](https://en.wikipedia.org/wiki/Terry_Kennedy_(baseball)) he had played for the St. Louis Cardinals and later San Diego Padres since 1978. Like Schmidt, he has an unusually high salary and the rest of his stats seem incorrect.
+```{r}
+Hitters["-Terry Kennedy",]
+```
+
+Relationship to rookie status and salary
+
+## Display session info
+
+```{r}
+sessionInfo()
+```
